@@ -1,0 +1,198 @@
+{% extends 'layout.html' %}
+{#
+  resume.html — displays the resume and an AI chat panel side by side.
+#}
+
+{% block content %}
+
+{# Socket.IO client: connects to the server and lets us emit/receive events #}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+
+{# marked.js: converts markdown text into HTML #}
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+<div class="resume-layout">
+
+  {# ============================================================
+     LEFT COLUMN: Resume content (rendered from database data)
+     ============================================================ #}
+  <div class="resume-content">
+    <h1>Resume</h1>
+
+    {% for inst_id, institution in resume.items() %}
+    <div class="institution">
+
+      <h2>{{ institution.name }}</h2>
+      <p class="institution-meta">
+        {{ institution.type }}
+        {% if institution.city %} · {{ institution.city }}, {{ institution.state }}{% endif %}
+      </p>
+
+      {% for pos_id, position in institution.positions.items() %}
+      <div class="position">
+
+        <div class="position-header">
+          <h3>{{ position.title }}</h3>
+          <span class="date-range">{{ position.start_date }} – {{ position.end_date }}</span>
+        </div>
+        <p class="responsibilities">{{ position.responsibilities }}</p>
+
+        {% for exp_id, experience in position.experiences.items() %}
+        <div class="experience">
+
+          {% if experience.hyperlink %}
+            <a href="{{ experience.hyperlink }}" target="_blank" class="experience-name">
+              {{ experience.name }}
+            </a>
+          {% else %}
+            <span class="experience-name">{{ experience.name }}</span>
+          {% endif %}
+
+          <span class="experience-desc"> — {{ experience.description }}</span>
+
+          {% if experience.skills %}
+          <div class="skills">
+            {% for skill_id, skill in experience.skills.items() %}
+            <span class="skill-badge">
+              {{ skill.name }}
+              <span class="skill-level">{{ skill.skill_level }}/10</span>
+            </span>
+            {% endfor %}
+          </div>
+          {% endif %}
+
+        </div>
+        {% endfor %}{# end experiences loop #}
+
+      </div>
+      {% endfor %}{# end positions loop #}
+
+    </div>
+    {% endfor %}{# end institutions loop #}
+
+  </div>
+
+  {# ============================================================
+     RIGHT COLUMN: AI Chat Panel
+     ============================================================ #}
+  <div class="chat-panel">
+
+    <div class="chat-header">
+      <span class="chat-status-dot"></span>
+      <span>AI Resume Assistant</span>
+    </div>
+
+    <div id="chat-log" class="chat-log">
+      <div class="msg-ai">
+        Hi! I've read this resume and I'm ready to answer questions about it.
+        Try asking: <em>"What programming skills does this person have?"</em>
+      </div>
+    </div>
+
+    <div class="chat-input-area">
+      <textarea
+        id="chat-input"
+        class="chat-input"
+        placeholder="Ask a question about the resume..."
+        rows="2"
+        onkeydown="handleEnterKey(event)"
+      ></textarea>
+      <button onclick="sendMessage()" class="chat-send-btn">Send</button>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  // ----------------------------------------------------------------
+  // SOCKET.IO SETUP
+  // ----------------------------------------------------------------
+  const socket = io();
+
+  // ----------------------------------------------------------------
+  // REFRESH RESUME CONTENT AFTER DB WRITES (Homework 1 Requirement)
+  // ----------------------------------------------------------------
+  async function refreshResumeContent() {
+  try {
+    const response = await fetch('/resume');
+    const html = await response.text();
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    
+    // البحث عن محتوى السيرة الذاتية وتحديثه
+    const newContent = doc.querySelector('.resume-content') || doc.querySelector('.resume-layout');
+    const currentContent = document.querySelector('.resume-content') || document.querySelector('.resume-layout');
+    
+    if (newContent && currentContent) {
+      currentContent.innerHTML = newContent.innerHTML;
+    }
+  } catch (err) {
+    console.error("Failed to refresh resume panel:", err);
+  }
+}
+
+  // ----------------------------------------------------------------
+  // RECEIVING MESSAGES
+  // ----------------------------------------------------------------
+  socket.on('receive_message', function(data) {
+    removeTypingIndicator();
+    displayMessage('AI', data.response);
+    refreshResumeContent();   // Updates the resume panel if a write occurred
+  });
+
+  // ----------------------------------------------------------------
+  // SENDING A MESSAGE
+  // ----------------------------------------------------------------
+  function sendMessage() {
+    const input_element = document.getElementById('chat-input');
+    const user_message  = input_element.value.trim();
+
+    if (!user_message) return;
+
+    input_element.value = '';
+    displayMessage('You', user_message);
+    showTypingIndicator();
+
+    socket.emit('send_message', { message: user_message });
+  }
+
+  // ----------------------------------------------------------------
+  // DISPLAY HELPERS
+  // ----------------------------------------------------------------
+  function displayMessage(sender, message_text) {
+    const chat_log   = document.getElementById('chat-log');
+    const bubble     = document.createElement('div');
+    bubble.className = (sender === 'You') ? 'msg-user' : 'msg-ai';
+    if (sender === 'You') {
+      bubble.textContent = sender + ': ' + message_text;
+    } else {
+      bubble.innerHTML = '<strong>' + sender + ':</strong> ' + marked.parse(message_text);
+    }
+    chat_log.appendChild(bubble);
+    chat_log.scrollTop = chat_log.scrollHeight;
+  }
+
+  function showTypingIndicator() {
+    const chat_log = document.getElementById('chat-log');
+    const indicator = document.createElement('div');
+    indicator.id = 'typing-indicator';
+    indicator.className = 'msg-ai typing';
+    indicator.textContent = 'AI is thinking...';
+    chat_log.appendChild(indicator);
+    chat_log.scrollTop = chat_log.scrollHeight;
+  }
+
+  function removeTypingIndicator() {
+    const indicator = document.getElementById('typing-indicator');
+    if (indicator) indicator.remove();
+  }
+
+  function handleEnterKey(event) {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      sendMessage();
+    }
+  }
+</script>
+
+{% endblock %}
